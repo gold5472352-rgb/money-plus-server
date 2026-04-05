@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 app = Flask(__name__)
 DB = "users.db"
 
-# 🔐 관리자 키 (원하는 값으로 바꿔라)
+# 🔐 관리자 키
 ADMIN_KEY = "1234"
 
 
@@ -63,43 +63,34 @@ def login():
     return jsonify({"status": "success", "msg": "로그인 성공"})
 
 
-# ✅ 유저 생성 API
+# 유저 생성
 @app.route("/create_user", methods=["POST"])
 def api_create_user():
     data = request.json
 
+    if data.get("admin_key") != ADMIN_KEY:
+        return jsonify({"status": "fail", "msg": "권한 없음"}), 403
+
     username = data.get("username")
     password = data.get("password")
     days = data.get("days", 30)
-    admin_key = data.get("admin_key")
-
-    if admin_key != ADMIN_KEY:
-        return jsonify({"status": "fail", "msg": "권한 없음"}), 403
-
-    if not username or not password:
-        return jsonify({"status": "fail", "msg": "값 누락"}), 400
 
     expire_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
 
     create_user(username, password, expire_date)
 
-    return jsonify({
-        "status": "success",
-        "msg": f"{username} 계정 생성 완료",
-        "expire_date": expire_date
-    })
+    return jsonify({"status": "success", "msg": "계정 생성 완료"})
 
 
-# ✅ 유저 삭제 API
+# 유저 삭제
 @app.route("/delete_user", methods=["POST"])
 def delete_user():
     data = request.json
 
-    username = data.get("username")
-    admin_key = data.get("admin_key")
-
-    if admin_key != ADMIN_KEY:
+    if data.get("admin_key") != ADMIN_KEY:
         return jsonify({"status": "fail", "msg": "권한 없음"}), 403
+
+    username = data.get("username")
 
     conn = sqlite3.connect(DB)
     cur = conn.cursor()
@@ -107,16 +98,15 @@ def delete_user():
     conn.commit()
     conn.close()
 
-    return jsonify({"status": "success", "msg": f"{username} 삭제 완료"})
+    return jsonify({"status": "success", "msg": "삭제 완료"})
 
 
-# ✅ 유저 목록 조회 (관리자용)
+# 유저 목록
 @app.route("/list_users", methods=["POST"])
 def list_users():
     data = request.json
-    admin_key = data.get("admin_key")
 
-    if admin_key != ADMIN_KEY:
+    if data.get("admin_key") != ADMIN_KEY:
         return jsonify({"status": "fail", "msg": "권한 없음"}), 403
 
     conn = sqlite3.connect(DB)
@@ -125,20 +115,79 @@ def list_users():
     rows = cur.fetchall()
     conn.close()
 
-    users = []
-    for r in rows:
-        users.append({
-            "username": r[0],
-            "expire_date": r[1]
-        })
+    users = [{"username": r[0], "expire_date": r[1]} for r in rows]
 
     return jsonify({"status": "success", "users": users})
 
 
+# 🔥 관리자 웹페이지
+@app.route("/admin")
+def admin_page():
+    return f"""
+    <html>
+    <body>
+        <h2>🔥 관리자 패널</h2>
+
+        <h3>유저 생성</h3>
+        <input id="u" placeholder="아이디"><br>
+        <input id="p" placeholder="비번"><br>
+        <input id="d" value="30"><br>
+        <button onclick="c()">생성</button>
+
+        <h3>유저 삭제</h3>
+        <input id="du" placeholder="아이디"><br>
+        <button onclick="del()">삭제</button>
+
+        <h3>목록</h3>
+        <button onclick="l()">조회</button>
+
+        <pre id="r"></pre>
+
+        <script>
+        const key = "{ADMIN_KEY}"
+
+        function c() {{
+            fetch('/create_user', {{
+                method:'POST',
+                headers:{{'Content-Type':'application/json'}},
+                body:JSON.stringify({{
+                    username:document.getElementById('u').value,
+                    password:document.getElementById('p').value,
+                    days:parseInt(document.getElementById('d').value),
+                    admin_key:key
+                }})
+            }}).then(r=>r.json()).then(d=>out(d))
+        }}
+
+        function del() {{
+            fetch('/delete_user', {{
+                method:'POST',
+                headers:{{'Content-Type':'application/json'}},
+                body:JSON.stringify({{
+                    username:document.getElementById('du').value,
+                    admin_key:key
+                }})
+            }}).then(r=>r.json()).then(d=>out(d))
+        }}
+
+        function l() {{
+            fetch('/list_users', {{
+                method:'POST',
+                headers:{{'Content-Type':'application/json'}},
+                body:JSON.stringify({{admin_key:key}})
+            }}).then(r=>r.json()).then(d=>out(d))
+        }}
+
+        function out(d) {{
+            document.getElementById('r').innerText = JSON.stringify(d,null,2)
+        }}
+        </script>
+    </body>
+    </html>
+    """
+
+
 if __name__ == "__main__":
     init_db()
-
-    # 기본 계정
     create_user("test", "1234", "2026-12-31")
-
     app.run(host="0.0.0.0", port=5000)
